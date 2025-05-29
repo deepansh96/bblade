@@ -39,11 +39,30 @@ public class BeybladePhysicsSetup : MonoBehaviour
     [SerializeField] private float slowModeTimeScale = 0.1f;
     [SerializeField] private float normalTimeScale = 1.0f;
     
+    [Header("Inertia Tensor Control")]
+    [SerializeField] private float automaticTensorThreshold = 50f;
+    [SerializeField] private Vector3 customInertiaTensor = new Vector3(1f, 2f, 1f);
+    [SerializeField] private Vector3 customInertiaTensorRotation = Vector3.zero;
+    [SerializeField] private bool showTensorInfo = true;
+    
     // Component references
     private Rigidbody mainRigidbody;
+    
+    // Tensor control state
+    private bool hasAutomaticTensorActivated = false;
+    private bool canStartMonitoring = false;
 
     void Awake()
     {
+        // Get the rigidbody component early
+        mainRigidbody = GetComponent<Rigidbody>();
+        
+        if (mainRigidbody != null)
+        {
+            // Set up custom inertia tensor
+            SetupCustomInertiaTensor();
+        }
+        
         // Time scale is now controlled by the slowMode toggle in Update()
     }
 
@@ -54,14 +73,11 @@ public class BeybladePhysicsSetup : MonoBehaviour
         
         if (mainRigidbody == null)
         {
-            Debug.LogWarning("No Rigidbody found on " + gameObject.name + ". Please add one manually.");
             return;
         }
         
         // Configure physics settings
         ConfigurePhysics();
-        
-        Debug.Log("Beyblade physics configured");
         
         // Apply initial torque after a brief delay to ensure everything is set up
         Invoke(nameof(ApplyInitialTorque), 0.01f);
@@ -72,11 +88,30 @@ public class BeybladePhysicsSetup : MonoBehaviour
         // Update time scale based on slow mode toggle
         // This allows for real-time changes from the inspector
         Time.timeScale = slowMode ? slowModeTimeScale : normalTimeScale;
+        
+        // Monitor angular velocity for automatic tensor switching
+        // Only start monitoring after initial torque has been applied
+        if (canStartMonitoring && mainRigidbody != null && !hasAutomaticTensorActivated)
+        {
+            float currentAngularVelocity = mainRigidbody.angularVelocity.magnitude;
+            
+            if (currentAngularVelocity < automaticTensorThreshold)
+            {
+                // Switch to automatic inertia tensor
+                mainRigidbody.ResetInertiaTensor();
+                Debug.Log("Reset inertia tensor" + mainRigidbody.inertiaTensor);
+                // mainRigidbody.automaticInertiaTensor = true;
+                hasAutomaticTensorActivated = true;
+            }
+        }
     }
     
     void ConfigurePhysics()
     {
-        if (mainRigidbody == null) return;
+        if (mainRigidbody == null) 
+        {
+            return;
+        }
         
         // Set the maximum angular velocity
         mainRigidbody.maxAngularVelocity = maxAngularVelocity;
@@ -86,14 +121,6 @@ public class BeybladePhysicsSetup : MonoBehaviour
         
         // Ensure the rigidbody is awake
         mainRigidbody.WakeUp();
-        
-        Debug.Log("Physics configured:");
-        Debug.Log($"  Max Angular Velocity: {maxAngularVelocity} rad/s");
-        Debug.Log($"  Custom Center of Mass: {enableCustomCenterOfMass}");
-        if (enableCustomCenterOfMass && referenceTransform != null)
-        {
-            Debug.Log($"  Center of Mass Position: {mainRigidbody.centerOfMass}");
-        }
     }
     
     void ConfigureCenterOfMass()
@@ -112,12 +139,9 @@ public class BeybladePhysicsSetup : MonoBehaviour
                 
                 // Set the custom center of mass
                 mainRigidbody.centerOfMass = localCenterOfMass;
-                
-                Debug.Log($"Custom center of mass set to: {localCenterOfMass} (world position: {referenceTransform.position})");
             }
             else
             {
-                Debug.LogWarning("Enable Custom Center Of Mass is true but Reference Transform is not assigned!");
                 // Fall back to automatic center of mass
                 mainRigidbody.automaticCenterOfMass = true;
             }
@@ -126,7 +150,6 @@ public class BeybladePhysicsSetup : MonoBehaviour
         {
             // Use automatic center of mass calculation
             mainRigidbody.automaticCenterOfMass = true;
-            Debug.Log("Using automatic center of mass calculation");
         }
     }
     
@@ -137,8 +160,40 @@ public class BeybladePhysicsSetup : MonoBehaviour
             Vector3 torque = torqueAxis.normalized * initialTorque;
             mainRigidbody.AddTorque(torque, ForceMode.Impulse);
             
-            Debug.Log($"Applied initial torque: {torque} to beyblade");
+            // Check angular velocity again after a physics update
+            Invoke(nameof(CheckAngularVelocityAfterPhysics), 0.02f);
+            
+            // Enable monitoring AFTER physics has had time to process the torque
+            // This prevents premature switching to automatic tensor
+            Invoke(nameof(EnableMonitoring), 5f);
         }
+    }
+    
+    void EnableMonitoring()
+    {
+        canStartMonitoring = true;
+    }
+    
+    void CheckAngularVelocityAfterPhysics()
+    {
+        if (mainRigidbody != null)
+        {
+            // If angular velocity is still zero, try alternative methods
+            if (mainRigidbody.angularVelocity.magnitude < 0.1f)
+            {
+                // Try directly setting angular velocity
+                Vector3 targetAngularVelocity = torqueAxis.normalized * 50f; // Start with 50 rad/s
+                mainRigidbody.angularVelocity = targetAngularVelocity;
+                
+                // Check again after another frame
+                Invoke(nameof(CheckDirectVelocitySet), 0.02f);
+            }
+        }
+    }
+    
+    void CheckDirectVelocitySet()
+    {
+        // Method kept for consistency with Invoke calls
     }
     
     // Public methods for runtime control
@@ -170,6 +225,9 @@ public class BeybladePhysicsSetup : MonoBehaviour
             
             // Reconfigure physics after reset
             ConfigurePhysics();
+            
+            // Reset tensor control state
+            ResetTensorControl();
         }
     }
     
@@ -195,6 +253,29 @@ public class BeybladePhysicsSetup : MonoBehaviour
             referenceTransform = reference;
         }
         ConfigureCenterOfMass();
+    }
+    
+    private void SetupCustomInertiaTensor()
+    {
+        if (mainRigidbody != null)
+        {
+            // Disable automatic inertia tensor calculation
+            mainRigidbody.automaticInertiaTensor = false;
+            
+            // Set custom inertia tensor values
+            mainRigidbody.inertiaTensor = customInertiaTensor;
+            mainRigidbody.inertiaTensorRotation = Quaternion.Euler(customInertiaTensorRotation);
+            
+            // Reset the activation flag
+            hasAutomaticTensorActivated = false;
+        }
+    }
+    
+    public void ResetTensorControl()
+    {
+        hasAutomaticTensorActivated = false;
+        canStartMonitoring = false;
+        SetupCustomInertiaTensor();
     }
     
     // Visualize center of mass in scene view
@@ -310,6 +391,34 @@ public class BeybladePhysicsSetup : MonoBehaviour
             float yOffset = enableCustomCenterOfMass && referenceTransform != null ? 1.60f : 1.40f;
             string physicsInfo = $"Max Angular Vel: {rb.maxAngularVelocity:F0} rad/s";
             UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, physicsInfo);
+            
+            // Display tensor information if enabled
+            if (showTensorInfo)
+            {
+                yOffset += 0.20f;
+                string tensorMode = hasAutomaticTensorActivated ? "Automatic" : "Custom";
+                string tensorInfo = $"Inertia Tensor: {tensorMode}";
+                UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, tensorInfo);
+                
+                if (!hasAutomaticTensorActivated)
+                {
+                    yOffset += 0.20f;
+                    string tensorValues = $"Tensor: ({rb.inertiaTensor.x:F1}, {rb.inertiaTensor.y:F1}, {rb.inertiaTensor.z:F1})";
+                    UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, tensorValues);
+                }
+                
+                yOffset += 0.20f;
+                float currentAngVel = mainRigidbody != null ? mainRigidbody.angularVelocity.magnitude : 0f;
+                string angVelInfo = $"Current Angular Vel: {currentAngVel:F1} rad/s";
+                UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, angVelInfo);
+                
+                if (!hasAutomaticTensorActivated)
+                {
+                    yOffset += 0.20f;
+                    string thresholdInfo = $"Auto Threshold: {automaticTensorThreshold:F0} rad/s";
+                    UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, thresholdInfo);
+                }
+            }
         }
 #endif
     }
