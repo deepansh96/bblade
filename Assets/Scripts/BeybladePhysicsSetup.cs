@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 public class BeybladePhysicsSetup : MonoBehaviour
 {
@@ -13,203 +12,122 @@ public class BeybladePhysicsSetup : MonoBehaviour
     [Header("Physics Settings")]
     [SerializeField] private float initialTorque = 100f;
     [SerializeField] private Vector3 torqueAxis = Vector3.up;
-    [SerializeField] private bool autoFindComponents = true;
-    [SerializeField] private bool createGround = true;
+    [SerializeField] private float maxAngularVelocity = 200f;
     
-    [Header("Mass Distribution (kg)")]
+    [Header("Center of Mass Settings")]
+    [SerializeField] private bool enableCustomCenterOfMass = false;
+    [SerializeField] private Transform referenceTransform;
+    
+    [Header("Mass Distribution (kg) - Reference Only")]
     [SerializeField] private float faceBoltMass = 0.005f;
     [SerializeField] private float metalWheelMass = 0.035f;
     [SerializeField] private float plasticWheelMass = 0.015f;
     [SerializeField] private float spinTrackMass = 0.008f;
     [SerializeField] private float tipMass = 0.003f;
     
-    [Header("Ground Settings")]
-    [SerializeField] private Vector3 groundSize = new Vector3(5f, 0.1f, 5f);
-    [SerializeField] private Vector3 groundPosition = new Vector3(0f, -1f, 0f);
+    [Header("Scene View Visualization")]
+    [SerializeField] private bool showCenterOfMass = true;
+    [SerializeField] private bool showCenterOfMassLabel = true;
+    [SerializeField] private Color centerOfMassColor = Color.red;
+    [SerializeField] private float centerOfMassSize = 0.02f;
+    [SerializeField] private bool showTorqueDirection = true;
+    [SerializeField] private Color torqueDirectionColor = Color.yellow;
+    [SerializeField] private float torqueArrowLength = 0.1f;
     
-    // Physics Materials
-    private PhysicsMaterial metalMaterial;
-    private PhysicsMaterial plasticMaterial;
-    private PhysicsMaterial rubberMaterial;
-    private PhysicsMaterial groundMaterial;
+    [Header("Time Control")]
+    [SerializeField] private bool slowMode = false;
+    [SerializeField] private float slowModeTimeScale = 0.1f;
+    [SerializeField] private float normalTimeScale = 1.0f;
     
     // Component references
     private Rigidbody mainRigidbody;
-    private List<Collider> allColliders = new List<Collider>();
+
+    void Awake()
+    {
+        // Time scale is now controlled by the slowMode toggle in Update()
+    }
 
     void Start()
     {
-        SetupPhysicsMaterials();
-        
-        if (autoFindComponents)
-        {
-            FindBeybladeComponents();
-        }
-        
-        SetupBeybladePhysics();
-        
-        if (createGround)
-        {
-            CreateGround();
-        }
-        
-        // Apply initial torque after a brief delay to ensure everything is set up
-        Invoke(nameof(ApplyInitialTorque), 0.1f);
-    }
-    
-    void SetupPhysicsMaterials()
-    {
-        // Metal material - low friction, medium bounce
-        metalMaterial = new PhysicsMaterial("Metal");
-        metalMaterial.dynamicFriction = 0.3f;
-        metalMaterial.staticFriction = 0.4f;
-        metalMaterial.bounciness = 0.3f;
-        metalMaterial.frictionCombine = PhysicsMaterialCombine.Average;
-        metalMaterial.bounceCombine = PhysicsMaterialCombine.Average;
-        
-        // Plastic material - medium friction, low bounce
-        plasticMaterial = new PhysicsMaterial("Plastic");
-        plasticMaterial.dynamicFriction = 0.5f;
-        plasticMaterial.staticFriction = 0.6f;
-        plasticMaterial.bounciness = 0.2f;
-        plasticMaterial.frictionCombine = PhysicsMaterialCombine.Average;
-        plasticMaterial.bounceCombine = PhysicsMaterialCombine.Average;
-        
-        // Rubber material - high friction, medium bounce (for tip)
-        rubberMaterial = new PhysicsMaterial("Rubber");
-        rubberMaterial.dynamicFriction = 0.8f;
-        rubberMaterial.staticFriction = 0.9f;
-        rubberMaterial.bounciness = 0.4f;
-        rubberMaterial.frictionCombine = PhysicsMaterialCombine.Maximum;
-        rubberMaterial.bounceCombine = PhysicsMaterialCombine.Average;
-        
-        // Ground material - medium friction
-        groundMaterial = new PhysicsMaterial("Ground");
-        groundMaterial.dynamicFriction = 0.6f;
-        groundMaterial.staticFriction = 0.7f;
-        groundMaterial.bounciness = 0.1f;
-        groundMaterial.frictionCombine = PhysicsMaterialCombine.Average;
-        groundMaterial.bounceCombine = PhysicsMaterialCombine.Minimum;
-    }
-    
-    void FindBeybladeComponents()
-    {
-        // Try to find components by name (case-insensitive)
-        Transform[] childTransforms = GetComponentsInChildren<Transform>();
-        
-        foreach (Transform child in childTransforms)
-        {
-            string name = child.name.ToLower();
-            
-            if (name.Contains("facebolt") || name.Contains("face") && name.Contains("bolt"))
-                faceBolt = child;
-            else if (name.Contains("metalwheel") || name.Contains("metal") && name.Contains("wheel"))
-                metalWheel = child;
-            else if (name.Contains("plasticwheel") || name.Contains("plastic") && name.Contains("wheel"))
-                plasticWheel = child;
-            else if (name.Contains("spintrack") || name.Contains("spin") && name.Contains("track"))
-                spinTrack = child;
-            else if (name.Contains("tip"))
-                tip = child;
-        }
-        
-        // Log found components
-        Debug.Log($"Found components - FaceBolt: {faceBolt?.name}, MetalWheel: {metalWheel?.name}, " +
-                  $"PlasticWheel: {plasticWheel?.name}, SpinTrack: {spinTrack?.name}, Tip: {tip?.name}");
-    }
-    
-    void SetupBeybladePhysics()
-    {
-        // Add main rigidbody to the parent object
+        // Get the manually set up rigidbody
         mainRigidbody = GetComponent<Rigidbody>();
+        
         if (mainRigidbody == null)
         {
-            mainRigidbody = gameObject.AddComponent<Rigidbody>();
+            Debug.LogWarning("No Rigidbody found on " + gameObject.name + ". Please add one manually.");
+            return;
         }
         
-        // Configure main rigidbody
-        mainRigidbody.mass = faceBoltMass + metalWheelMass + plasticWheelMass + spinTrackMass + tipMass;
-        mainRigidbody.linearDamping = 0.1f;
-        mainRigidbody.angularDamping = 0.05f;
-        mainRigidbody.useGravity = true;
-        mainRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+        // Configure physics settings
+        ConfigurePhysics();
         
-        // Setup individual components
-        SetupComponent(faceBolt, plasticMaterial, faceBoltMass);
-        SetupComponent(metalWheel, metalMaterial, metalWheelMass);
-        SetupComponent(plasticWheel, plasticMaterial, plasticWheelMass);
-        SetupComponent(spinTrack, plasticMaterial, spinTrackMass);
-        SetupComponent(tip, rubberMaterial, tipMass);
+        Debug.Log("Beyblade physics configured");
         
-        // Adjust center of mass (metal wheel is typically the heaviest and should lower center of mass)
-        if (metalWheel != null)
-        {
-            Vector3 centerOfMass = transform.InverseTransformPoint(metalWheel.position);
-            centerOfMass.y -= 0.01f; // Lower the center of mass slightly
-            mainRigidbody.centerOfMass = centerOfMass;
-        }
-        
-        Debug.Log($"Beyblade physics setup complete. Total mass: {mainRigidbody.mass}kg");
+        // Apply initial torque after a brief delay to ensure everything is set up
+        Invoke(nameof(ApplyInitialTorque), 0.01f);
     }
     
-    void SetupComponent(Transform component, PhysicsMaterial material, float mass)
+    void Update()
     {
-        if (component == null) return;
-        
-        // Get or add mesh collider
-        MeshCollider meshCollider = component.GetComponent<MeshCollider>();
-        if (meshCollider == null)
-        {
-            meshCollider = component.gameObject.AddComponent<MeshCollider>();
-        }
-        
-        // Configure mesh collider
-        MeshRenderer meshRenderer = component.GetComponent<MeshRenderer>();
-        MeshFilter meshFilter = component.GetComponent<MeshFilter>();
-        
-        if (meshFilter != null && meshFilter.sharedMesh != null)
-        {
-            meshCollider.sharedMesh = meshFilter.sharedMesh;
-            meshCollider.convex = true; // Required for rigidbodies
-            meshCollider.material = material;
-        }
-        
-        allColliders.Add(meshCollider);
-        
-        // Store mass information for center of mass calculation
-        // (We use the main rigidbody instead of individual rigidbodies for better stability)
-        
-        Debug.Log($"Setup component: {component.name} with material: {material.name}");
+        // Update time scale based on slow mode toggle
+        // This allows for real-time changes from the inspector
+        Time.timeScale = slowMode ? slowModeTimeScale : normalTimeScale;
     }
     
-    void CreateGround()
+    void ConfigurePhysics()
     {
-        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        ground.name = "BeybladeGround";
-        ground.transform.position = groundPosition;
-        ground.transform.localScale = groundSize;
+        if (mainRigidbody == null) return;
         
-        // Setup ground physics
-        Collider groundCollider = ground.GetComponent<Collider>();
-        groundCollider.material = groundMaterial;
+        // Set the maximum angular velocity
+        mainRigidbody.maxAngularVelocity = maxAngularVelocity;
         
-        // Make ground kinematic (immovable)
-        Rigidbody groundRb = ground.GetComponent<Rigidbody>();
-        if (groundRb == null)
+        // Configure center of mass
+        ConfigureCenterOfMass();
+        
+        // Ensure the rigidbody is awake
+        mainRigidbody.WakeUp();
+        
+        Debug.Log("Physics configured:");
+        Debug.Log($"  Max Angular Velocity: {maxAngularVelocity} rad/s");
+        Debug.Log($"  Custom Center of Mass: {enableCustomCenterOfMass}");
+        if (enableCustomCenterOfMass && referenceTransform != null)
         {
-            groundRb = ground.AddComponent<Rigidbody>();
+            Debug.Log($"  Center of Mass Position: {mainRigidbody.centerOfMass}");
         }
-        groundRb.isKinematic = true;
+    }
+    
+    void ConfigureCenterOfMass()
+    {
+        if (mainRigidbody == null) return;
         
-        // Optional: Create a better looking material for the ground
-        Renderer groundRenderer = ground.GetComponent<Renderer>();
-        Material groundMat = new Material(Shader.Find("Standard"));
-        groundMat.color = new Color(0.8f, 0.8f, 0.8f);
-        groundMat.SetFloat("_Metallic", 0.1f);
-        groundMat.SetFloat("_Glossiness", 0.3f);
-        groundRenderer.material = groundMat;
-        
-        Debug.Log("Ground created for beyblade arena");
+        if (enableCustomCenterOfMass)
+        {
+            if (referenceTransform != null)
+            {
+                // Disable automatic center of mass calculation
+                mainRigidbody.automaticCenterOfMass = false;
+                
+                // Convert the reference transform's local position to local space relative to this rigidbody
+                Vector3 localCenterOfMass = transform.InverseTransformPoint(referenceTransform.position);
+                
+                // Set the custom center of mass
+                mainRigidbody.centerOfMass = localCenterOfMass;
+                
+                Debug.Log($"Custom center of mass set to: {localCenterOfMass} (world position: {referenceTransform.position})");
+            }
+            else
+            {
+                Debug.LogWarning("Enable Custom Center Of Mass is true but Reference Transform is not assigned!");
+                // Fall back to automatic center of mass
+                mainRigidbody.automaticCenterOfMass = true;
+            }
+        }
+        else
+        {
+            // Use automatic center of mass calculation
+            mainRigidbody.automaticCenterOfMass = true;
+            Debug.Log("Using automatic center of mass calculation");
+        }
     }
     
     void ApplyInitialTorque()
@@ -233,6 +151,14 @@ public class BeybladePhysicsSetup : MonoBehaviour
         }
     }
     
+    public void ApplyMovementForce(Vector3 force)
+    {
+        if (mainRigidbody != null)
+        {
+            mainRigidbody.AddForce(force, ForceMode.Force);
+        }
+    }
+    
     public void ResetBeyblade()
     {
         if (mainRigidbody != null)
@@ -241,6 +167,9 @@ public class BeybladePhysicsSetup : MonoBehaviour
             mainRigidbody.angularVelocity = Vector3.zero;
             transform.position = Vector3.zero;
             transform.rotation = Quaternion.identity;
+            
+            // Reconfigure physics after reset
+            ConfigurePhysics();
         }
     }
     
@@ -253,18 +182,174 @@ public class BeybladePhysicsSetup : MonoBehaviour
         return 0f;
     }
     
+    public void UpdateCenterOfMass()
+    {
+        ConfigureCenterOfMass();
+    }
+    
+    public void SetCustomCenterOfMass(bool enable, Transform reference = null)
+    {
+        enableCustomCenterOfMass = enable;
+        if (reference != null)
+        {
+            referenceTransform = reference;
+        }
+        ConfigureCenterOfMass();
+    }
+    
     // Visualize center of mass in scene view
     void OnDrawGizmos()
     {
-        if (mainRigidbody != null)
+        // Draw center of mass visualization
+        if (showCenterOfMass)
         {
-            Gizmos.color = Color.red;
-            Vector3 centerOfMass = transform.TransformPoint(mainRigidbody.centerOfMass);
-            Gizmos.DrawWireSphere(centerOfMass, 0.01f);
+            DrawCenterOfMass();
         }
         
         // Draw torque direction
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawRay(transform.position, torqueAxis.normalized * 0.1f);
+        if (showTorqueDirection)
+        {
+            DrawTorqueDirection();
+        }
+    }
+    
+    void OnDrawGizmosSelected()
+    {
+        // Enhanced visualization when object is selected
+        if (showCenterOfMass)
+        {
+            DrawCenterOfMass();
+            DrawCenterOfMassInfo();
+        }
+        
+        if (showTorqueDirection)
+        {
+            DrawTorqueDirection();
+        }
+    }
+    
+    private void DrawCenterOfMass()
+    {
+        Gizmos.color = centerOfMassColor;
+        
+        // Get rigidbody reference directly for edit-time visualization
+        Rigidbody rb = GetComponent<Rigidbody>();
+        
+        Vector3 centerOfMass;
+        if (rb != null)
+        {
+            // Use actual rigidbody center of mass
+            centerOfMass = transform.TransformPoint(rb.centerOfMass);
+        }
+        else
+        {
+            // Fallback to object center if no rigidbody
+            centerOfMass = transform.position;
+        }
+        
+        // Draw main sphere
+        Gizmos.DrawWireSphere(centerOfMass, centerOfMassSize);
+        Gizmos.DrawSphere(centerOfMass, centerOfMassSize * 0.5f);
+        
+        // Draw crosshair for better visibility
+        float crossSize = centerOfMassSize * 2f;
+        Gizmos.DrawLine(centerOfMass - Vector3.right * crossSize, centerOfMass + Vector3.right * crossSize);
+        Gizmos.DrawLine(centerOfMass - Vector3.up * crossSize, centerOfMass + Vector3.up * crossSize);
+        Gizmos.DrawLine(centerOfMass - Vector3.forward * crossSize, centerOfMass + Vector3.forward * crossSize);
+        
+        // Draw label if enabled
+        if (showCenterOfMassLabel)
+        {
+#if UNITY_EDITOR
+            string label = enableCustomCenterOfMass ? "Center of Mass (Custom)" : "Center of Mass (Auto)";
+            UnityEditor.Handles.Label(centerOfMass + Vector3.up * 0.05f, label);
+#endif
+        }
+    }
+    
+    private void DrawCenterOfMassInfo()
+    {
+        // Get rigidbody reference directly for edit-time visualization
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb == null) return;
+        
+        Vector3 centerOfMass = transform.TransformPoint(rb.centerOfMass);
+        
+        // Draw line from object center to center of mass
+        Gizmos.color = centerOfMassColor * 0.7f;
+        Gizmos.DrawLine(transform.position, centerOfMass);
+        
+        // Calculate and display offset
+        Vector3 offset = rb.centerOfMass;
+        
+#if UNITY_EDITOR
+        // Use face bolt position as reference, or fallback to transform position
+        Vector3 labelBasePos = faceBolt != null ? faceBolt.position : transform.position;
+        
+        string info = $"CoM Offset: ({offset.x:F3}, {offset.y:F3}, {offset.z:F3})";
+        UnityEditor.Handles.Label(labelBasePos + Vector3.up * 0.80f, info);
+        
+        // Display total mass if available
+        string massInfo = $"Total Mass: {rb.mass:F3} kg";
+        UnityEditor.Handles.Label(labelBasePos + Vector3.up * 1.00f, massInfo);
+        
+        // Display center of mass mode
+        string comModeInfo = enableCustomCenterOfMass ? "CoM Mode: Custom" : "CoM Mode: Automatic";
+        UnityEditor.Handles.Label(labelBasePos + Vector3.up * 1.20f, comModeInfo);
+        
+        // Display reference transform info if using custom center of mass
+        if (enableCustomCenterOfMass && referenceTransform != null)
+        {
+            string refInfo = $"Reference: {referenceTransform.name}";
+            UnityEditor.Handles.Label(labelBasePos + Vector3.up * 1.40f, refInfo);
+        }
+        
+        // Display adjusted physics values during play mode
+        if (Application.isPlaying)
+        {
+            float yOffset = enableCustomCenterOfMass && referenceTransform != null ? 1.60f : 1.40f;
+            string physicsInfo = $"Max Angular Vel: {rb.maxAngularVelocity:F0} rad/s";
+            UnityEditor.Handles.Label(labelBasePos + Vector3.up * yOffset, physicsInfo);
+        }
+#endif
+    }
+    
+    private void DrawTorqueDirection()
+    {
+        Gizmos.color = torqueDirectionColor;
+        Vector3 torqueDir = torqueAxis.normalized * torqueArrowLength;
+        Vector3 startPos = transform.position;
+        Vector3 endPos = startPos + torqueDir;
+        
+        // Draw main arrow
+        Gizmos.DrawRay(startPos, torqueDir);
+        
+        // Draw arrowhead
+        Vector3 arrowHead1 = endPos - torqueDir.normalized * 0.02f + Vector3.Cross(torqueDir, Vector3.forward).normalized * 0.01f;
+        Vector3 arrowHead2 = endPos - torqueDir.normalized * 0.02f + Vector3.Cross(torqueDir, Vector3.right).normalized * 0.01f;
+        
+        Gizmos.DrawLine(endPos, arrowHead1);
+        Gizmos.DrawLine(endPos, arrowHead2);
+        
+#if UNITY_EDITOR
+        if (showCenterOfMassLabel)
+        {
+            // Use face bolt position as reference, or fallback to transform position
+            Vector3 labelBasePos = faceBolt != null ? faceBolt.position : transform.position;
+            
+            UnityEditor.Handles.Label(labelBasePos + Vector3.up * 1.60f, $"Torque ({initialTorque})");
+            
+            // Show current angular velocity during play mode
+            if (Application.isPlaying && mainRigidbody != null)
+            {
+                float currentSpeed = mainRigidbody.angularVelocity.magnitude;
+                string speedInfo = $"Angular Vel: {currentSpeed:F1} rad/s";
+                UnityEditor.Handles.Label(labelBasePos + Vector3.up * 1.80f, speedInfo);
+                
+                string maxSpeedInfo = $"Max: {mainRigidbody.maxAngularVelocity:F0} rad/s";
+                UnityEditor.Handles.Label(labelBasePos + Vector3.up * 2.00f, maxSpeedInfo);
+            }
+        }
+#endif
     }
 } 
